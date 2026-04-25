@@ -1,0 +1,75 @@
+services:
+  api:
+    build: .
+    image: rcs-middleware:latest
+    container_name: rcs-api
+    env_file: .env
+    environment:
+      MYSQL_URL: mysql+aiomysql://rcs:rcs@mysql:3306/rcs_middleware
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  worker:
+    build: .
+    image: rcs-middleware:latest
+    container_name: rcs-worker
+    env_file: .env
+    environment:
+      MYSQL_URL: mysql+aiomysql://rcs:rcs@mysql:3306/rcs_middleware
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app worker -l info -Q rcs.default
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: rcs-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: rcs_middleware
+      MYSQL_USER: rcs
+      MYSQL_PASSWORD: rcs
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: rcs-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:
