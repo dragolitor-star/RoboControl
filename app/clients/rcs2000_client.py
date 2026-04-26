@@ -150,6 +150,14 @@ class RCS2000Client:
             "Content-Type": "application/json",
             "X-LR-REQUEST-ID": datetime.utcnow().strftime("%Y%m%d%H%M%S"),
         }
+        logger.info(
+            "rcs_plain_request_outgoing",
+            method=method_u,
+            path=path,
+            full_url=full_url,
+            headers=headers,
+            body=request_body_for_log(body),
+        )
         try:
             response = await self._client.request(
                 method=method_u,
@@ -237,6 +245,15 @@ class RCS2000Client:
         )
 
         full_url = await self._resolve_full_url(path)
+        logger.info(
+            "rcs_signed_request_outgoing",
+            method=method,
+            path=path,
+            full_url=full_url,
+            headers=signed.headers,
+            params=merged_params,
+            body=request_body_for_log(body),
+        )
 
         try:
             response = await self._client.request(
@@ -270,6 +287,12 @@ class RCS2000Client:
         return f"{self._base_url}{path}"
 
     def _parse_response(self, response: httpx.Response, path: str) -> dict[str, Any]:
+        logger.info(
+            "rcs_response_received",
+            path=path,
+            status=response.status_code,
+            body_preview=response.text[:512],
+        )
         if response.status_code >= 500:
             logger.warning(
                 "rcs_5xx",
@@ -313,6 +336,7 @@ class RCS2000Client:
     @staticmethod
     def _raise_business_error(code: str, message: str, payload: dict[str, Any]) -> None:
         # TODO(RCS-DOC): expand mapping once full RCS error code list is known.
+        logger.warning("rcs_business_error", code=code, message=message, payload=payload)
         if code == "Err_TaskNotStart":
             raise TaskNotStartedError(message=message, details={"rcs_code": code, "payload": payload})
         raise RCSClientError(
@@ -320,6 +344,16 @@ class RCS2000Client:
             code=f"RCS_{code}",
             details={"rcs_code": code, "payload": payload},
         )
+
+
+def request_body_for_log(body: dict[str, Any] | None) -> dict[str, Any] | None:
+    if body is None:
+        return None
+    # Keep logs readable while preserving shape for Postman comparison.
+    text = json.dumps(body, ensure_ascii=False)
+    if len(text) <= 1200:
+        return body
+    return {"_truncated": True, "preview": text[:1200]}
 
 
 # --------------------------------------------------------------------------- #

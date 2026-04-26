@@ -149,6 +149,15 @@ class RcsSubmitService:
             if cached is not None:
                 return cached
 
+        logger.info(
+            "rcs_submit_attempt",
+            method=request.method,
+            path=path,
+            send_signed=request.send_signed,
+            persist_task=request.persist_task,
+            body=request.body,
+        )
+
         try:
             if request.send_signed:
                 rcs_response = await self._rcs.signed_request(
