@@ -89,6 +89,14 @@ class WebhookSignatureError(BaseAppError):
     message = "Webhook signature is missing or invalid."
 
 
+class InvalidRcsPathError(BaseAppError):
+    """RCS path must stay under the documented prefix (SSRF guard)."""
+
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+    code = "INVALID_RCS_PATH"
+    message = "RCS path must start with /rcs/rtas and must not contain '..'."
+
+
 class AuthenticationError(BaseAppError):
     http_status = status.HTTP_401_UNAUTHORIZED
     code = "UNAUTHORIZED"

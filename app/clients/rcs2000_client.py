@@ -110,6 +110,28 @@ class RCS2000Client:
             idempotent=True,
         )
 
+    async def signed_request(
+        self,
+        *,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Call RCS with HMAC signing for an arbitrary path under the RCS base URL.
+
+        GET is retried (idempotent); POST is never retried.
+        """
+        method_u = method.upper()
+        if method_u not in ("GET", "POST"):
+            raise ValueError(f"Unsupported HTTP method: {method}")
+        idempotent = method_u == "GET"
+        return await self._request(
+            method=method_u,
+            path=path,
+            body=body if method_u == "POST" else None,
+            idempotent=idempotent,
+        )
+
     # ------------------------------ internals ------------------------------- #
 
     async def _request(
@@ -132,13 +154,28 @@ class RCS2000Client:
                     reraise=True,
                 ):
                     with attempt:
-                        return await self._do_request(method, path, body, params)
+                        return await self._do_request(
+                            method, path, body, params, preserve_retryable=True
+                        )
+            except _RETRYABLE_HTTP_EXC as exc:
+                # Retry budget exhausted for transient network failures.
+                raise RCSClientError(
+                    message=f"RCS network error after retries: {exc}",
+                    code="RCS_NETWORK_ERROR",
+                    details={"path": path, "method": method},
+                ) from exc
+            except _RetryableUpstreamError as exc:
+                raise RCSClientError(
+                    message=str(exc),
+                    code="RCS_UPSTREAM_5XX",
+                    details={"path": path, "method": method},
+                ) from exc
             except RetryError as exc:  # pragma: no cover - reraise=True normally surfaces
                 raise RCSClientError(message=str(exc)) from exc
             # Loop exits via `return` in `attempt`; the line below is unreachable
             # but satisfies type checkers.
             raise RCSClientError("Retry loop exited without result")  # pragma: no cover
-        return await self._do_request(method, path, body, params)
+        return await self._do_request(method, path, body, params, preserve_retryable=False)
 
     async def _do_request(
         self,
@@ -146,6 +183,7 @@ class RCS2000Client:
         path: str,
         body: dict[str, Any] | None,
         params: dict[str, Any] | None,
+        preserve_retryable: bool,
     ) -> dict[str, Any]:
         body_bytes = json.dumps(body, separators=(",", ":")).encode("utf-8") if body else b""
         signed = self._signer.sign(method=method, path=path, body=body_bytes)
@@ -179,9 +217,15 @@ class RCS2000Client:
                 params=merged_params,
                 headers=signed.headers,
             )
-        except _RETRYABLE_HTTP_EXC:
-            logger.warning("rcs_network_error", path=path, method=method)
-            raise
+        except _RETRYABLE_HTTP_EXC as exc:
+            logger.warning("rcs_network_error", path=path, method=method, error=str(exc))
+            if preserve_retryable:
+                raise
+            raise RCSClientError(
+                message=f"RCS network error: {exc}",
+                code="RCS_NETWORK_ERROR",
+                details={"path": path, "method": method},
+            ) from exc
         except httpx.HTTPError as exc:
             logger.error("rcs_http_error", path=path, error=str(exc))
             raise RCSClientError(message=f"HTTP error: {exc}") from exc

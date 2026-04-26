@@ -38,6 +38,8 @@ const API = (() => {
       return request('GET', url);
     },
     createTask: (payload) => request('POST', '/tasks/create', payload),
+    getRcsSubmitPreview: () => request('GET', '/tasks/rcs-preview'),
+    submitRcsRaw: (payload) => request('POST', '/tasks/rcs-submit', payload),
     getWebhookLogs: (page = 1, pageSize = 30, taskCode = '') => {
       let url = `/webhook/logs?page=${page}&pageSize=${pageSize}`;
       if (taskCode) url += `&taskCode=${taskCode}`;

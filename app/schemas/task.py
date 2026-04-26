@@ -1,7 +1,7 @@
 """Task-related request/response schemas."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,3 +32,43 @@ class TaskHistoryItem(BaseModel):
     source_code: Optional[str] = Field(default=None, alias="sourceCode")
     target_code: Optional[str] = Field(default=None, alias="targetCode")
     error_msg: Optional[str] = Field(default=None, alias="errorMsg")
+
+
+class RcsSubmitPreviewData(BaseModel):
+    """UI: resolved host + default task-submit path and sample JSON."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    resolved_base_url: str = Field(alias="resolvedBaseUrl")
+    method: Literal["POST", "GET"] = "POST"
+    path: str
+    full_url_without_sign: str = Field(alias="fullUrlWithoutSign")
+    example_body: dict[str, Any] = Field(alias="exampleBody")
+
+
+class RcsRawSubmitRequest(BaseModel):
+    """Signed request to RCS; path is normalized (full URL → path only)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    method: Literal["POST", "GET"] = "POST"
+    path: str = Field(..., min_length=1, description="Path or full URL; host is ignored.")
+    body: dict[str, Any] | None = None
+    persist_task: bool = Field(
+        default=True,
+        alias="persistTask",
+        description="If true, store TaskHistory when robotTaskCode is returned.",
+    )
+
+
+class RcsRawSubmitResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    robot_task_code: Optional[str] = Field(default=None, alias="robotTaskCode")
+    status: Optional[str] = None
+    cached: bool = Field(default=False, alias="cached")
+    persisted: bool = Field(default=False, alias="persisted")
+    rcs: dict[str, Any] = Field(
+        alias="rcsResponse",
+        description="Raw JSON from RCS after successful HTTP call.",
+    )

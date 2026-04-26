@@ -437,26 +437,95 @@ const App = (() => {
   /* ── Modals ── */
   function openCreateModal() {
     document.getElementById('modal-overlay').innerHTML = `
-      <div class="modal">
+      <div class="modal modal-postman">
         <div class="modal-title">Yeni Görev Oluştur</div>
-        <div class="form-group"><label class="form-label">Robot Tipi</label>
-          <select id="m-robotType" class="form-select"><option value="LMR">LMR — Light Mobile</option><option value="FMR">FMR — Forklift</option><option value="CT7">CT7 — Container</option></select>
+        <div class="task-modal-tabs">
+          <button type="button" class="task-modal-tab active" data-tab="quick" onclick="App.switchTaskModalTab('quick')">Hızlı form</button>
+          <button type="button" class="task-modal-tab" data-tab="rcs" onclick="App.switchTaskModalTab('rcs')">RCS isteği (Postman)</button>
         </div>
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">Kaynak</label><input id="m-source" class="form-input" placeholder="örn: WH-A01"></div>
-          <div class="form-group"><label class="form-label">Hedef</label><input id="m-target" class="form-input" placeholder="örn: WH-B03"></div>
+        <div id="task-tab-quick">
+          <div class="form-group"><label class="form-label">Robot Tipi</label>
+            <select id="m-robotType" class="form-select"><option value="LMR">LMR — Light Mobile</option><option value="FMR">FMR — Forklift</option><option value="CT7">CT7 — Container</option></select>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Kaynak</label><input id="m-source" class="form-input" placeholder="örn: WH-A01"></div>
+            <div class="form-group"><label class="form-label">Hedef</label><input id="m-target" class="form-input" placeholder="örn: WH-B03"></div>
+          </div>
+          <div class="form-group"><label class="form-label">Öncelik</label><input id="m-priority" class="form-input" type="number" value="10" min="1" max="100"></div>
         </div>
-        <div class="form-group"><label class="form-label">Öncelik</label><input id="m-priority" class="form-input" type="number" value="10" min="1" max="100"></div>
+        <div id="task-tab-rcs" style="display:none;">
+          <p class="rcs-editor-hint" style="margin-bottom:12px;">Ayarlar sayfasındaki IP ve port, taban URL olarak kullanılır. Aşağıdaki tam URL yalnızca önizlemedir; istek sunucuda HMAC ile imzalanır ve <code>sign</code> sorgu parametresi otomatik eklenir.</p>
+          <div class="form-group">
+            <label class="form-label">Taban URL (salt okunur)</label>
+            <input type="text" id="rcs-preview-base" class="form-input code-editor-sm" readonly placeholder="Önizleme yükleniyor…">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Path veya tam URL</label>
+            <input type="text" id="rcs-editor-path" class="form-input code-editor-sm" placeholder="/rcs/rtas/api/robot/controller/task/submit">
+            <div class="rcs-editor-hint" id="rcs-full-url-hint"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">JSON body</label>
+            <textarea id="rcs-editor-body" class="code-editor" spellcheck="false" placeholder="{ }"></textarea>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+            <input type="checkbox" id="rcs-persist" checked style="width:auto;">
+            <label for="rcs-persist" style="margin:0;font-size:13px;color:var(--text-secondary);">RCS cevabında görev kodu varsa geçmişe kaydet</label>
+          </div>
+          <div style="margin-top:8px;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="App.refreshRcsPreview()">${UI.icon('refresh')} Önizlemeyi yenile</button>
+          </div>
+        </div>
         <div class="modal-actions">
-          <button class="btn btn-ghost" onclick="App.closeModal()">İptal</button>
-          <button class="btn btn-primary" id="m-submit" onclick="App.submitTask()">Gönder</button>
+          <button type="button" class="btn btn-ghost" onclick="App.closeModal()">İptal</button>
+          <button type="button" class="btn btn-primary" id="m-submit-quick" onclick="App.submitTask()">Gönder</button>
+          <button type="button" class="btn btn-primary" id="m-submit-rcs" style="display:none;" onclick="App.submitRcsRawTask()">RCS'e gönder</button>
         </div>
       </div>`;
     document.getElementById('modal-overlay').classList.add('active');
+    refreshRcsPreview();
   }
+
+  function switchTaskModalTab(tab) {
+    document.querySelectorAll('.task-modal-tab').forEach((b) => {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    const q = document.getElementById('task-tab-quick');
+    const r = document.getElementById('task-tab-rcs');
+    if (q) q.style.display = tab === 'quick' ? 'block' : 'none';
+    if (r) r.style.display = tab === 'rcs' ? 'block' : 'none';
+    const bq = document.getElementById('m-submit-quick');
+    const br = document.getElementById('m-submit-rcs');
+    if (bq) bq.style.display = tab === 'quick' ? '' : 'none';
+    if (br) br.style.display = tab === 'rcs' ? '' : 'none';
+  }
+
+  async function refreshRcsPreview() {
+    try {
+      const res = await API.getRcsSubmitPreview();
+      const d = res.data;
+      const baseEl = document.getElementById('rcs-preview-base');
+      const pathEl = document.getElementById('rcs-editor-path');
+      const bodyEl = document.getElementById('rcs-editor-body');
+      const hintEl = document.getElementById('rcs-full-url-hint');
+      if (!baseEl || !pathEl || !bodyEl) return;
+      baseEl.value = d.resolvedBaseUrl || '';
+      pathEl.value = d.path || '';
+      bodyEl.value = JSON.stringify(d.exampleBody || {}, null, 2);
+      if (hintEl) {
+        hintEl.textContent = d.fullUrlWithoutSign
+          ? `Örnek tam URL (sign hariç): ${d.fullUrlWithoutSign}`
+          : '';
+      }
+    } catch (e) {
+      UI.toast('RCS önizlemesi alınamadı: ' + (e.message || 'hata'), 'error');
+    }
+  }
+
   function closeModal() { document.getElementById('modal-overlay').classList.remove('active'); }
   async function submitTask() {
-    const btn = document.getElementById('m-submit');
+    const btn = document.getElementById('m-submit-quick');
+    if (!btn) return;
     btn.disabled = true; btn.textContent = 'Gönderiliyor…';
     try {
       const payload = {
@@ -477,6 +546,48 @@ const App = (() => {
     }
   }
 
+  async function submitRcsRawTask() {
+    const btn = document.getElementById('m-submit-rcs');
+    if (!btn) return;
+    const path = document.getElementById('rcs-editor-path')?.value?.trim() || '';
+    const rawBody = document.getElementById('rcs-editor-body')?.value?.trim() || '';
+    if (!path) {
+      UI.toast('Path veya tam URL gerekli', 'error');
+      return;
+    }
+    let body;
+    try {
+      body = rawBody ? JSON.parse(rawBody) : {};
+    } catch (err) {
+      UI.toast('JSON body geçersiz', 'error');
+      return;
+    }
+    const persistTask = document.getElementById('rcs-persist')?.checked !== false;
+    btn.disabled = true;
+    btn.textContent = 'Gönderiliyor…';
+    try {
+      const res = await API.submitRcsRaw({
+        method: 'POST',
+        path,
+        body,
+        persistTask,
+      });
+      const d = res.data;
+      const code = d.robotTaskCode || d.rcsResponse?.data?.robotTaskCode;
+      UI.toast(
+        code ? `RCS yanıtı alındı — ${code}` : 'RCS isteği tamamlandı',
+        'success',
+      );
+      closeModal();
+      if (currentPage === 'tasks') loadTasks();
+      else if (currentPage === 'dashboard') renderDashboard();
+    } catch (e) {
+      UI.toast(e.message || 'RCS isteği başarısız', 'error');
+      btn.disabled = false;
+      btn.textContent = "RCS'e gönder";
+    }
+  }
+
   function toggleMobileMenu() {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebar-backdrop').classList.toggle('open');
@@ -489,7 +600,9 @@ const App = (() => {
   return { 
     init, navigate, login, logout, testHealth,
     filterTasks, goToTaskPage, filterWh, goToWhPage,
-    openCreateModal, closeModal, submitTask, toggleMobileMenu,
+    openCreateModal, closeModal, submitTask, submitRcsRawTask,
+    switchTaskModalTab, refreshRcsPreview,
+    toggleMobileMenu,
     saveSystemConfig
   };
 })();

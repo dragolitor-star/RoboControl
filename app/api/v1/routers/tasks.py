@@ -12,7 +12,15 @@ from app.core.security import require_api_key
 from app.db.session import get_db_session
 from app.models.task_history import TaskHistory, TaskStatus
 from app.schemas.common import StandardResponse
-from app.schemas.task import TaskCreateRequest, TaskCreateResponseData, TaskHistoryItem
+from app.schemas.task import (
+    RcsRawSubmitRequest,
+    RcsRawSubmitResult,
+    RcsSubmitPreviewData,
+    TaskCreateRequest,
+    TaskCreateResponseData,
+    TaskHistoryItem,
+)
+from app.services.rcs_submit_service import RcsSubmitService
 from app.services.task_service import TaskService
 from app.utils.redis_helper import get_redis
 
@@ -21,6 +29,50 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 def _get_rcs() -> RCS2000Client:
     return get_rcs_client()
+
+
+@router.get(
+    "/rcs-preview",
+    response_model=StandardResponse[RcsSubmitPreviewData],
+    summary="RCS görev submit için çözümlenen taban URL, path ve örnek JSON",
+    dependencies=[Depends(require_api_key)],
+)
+async def rcs_submit_preview(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> StandardResponse[RcsSubmitPreviewData]:
+    redis_client: Redis = await get_redis()
+    svc = RcsSubmitService(session=session, redis_client=redis_client, rcs_client=_get_rcs())
+    data = await svc.preview()
+    return StandardResponse[RcsSubmitPreviewData](
+        success=True,
+        request_id=getattr(request.state, "request_id", ""),
+        data=data,
+    )
+
+
+@router.post(
+    "/rcs-submit",
+    response_model=StandardResponse[RcsRawSubmitResult],
+    status_code=status.HTTP_200_OK,
+    summary="Postman tarzı: imzalı RCS isteği (path + JSON body)",
+    dependencies=[Depends(require_api_key)],
+)
+async def rcs_submit_raw(
+    request: Request,
+    payload: RcsRawSubmitRequest,
+    idempotency_key: str | None = Header(default=None, alias=IDEMPOTENCY_HEADER),
+    session: AsyncSession = Depends(get_db_session),
+    rcs_client: RCS2000Client = Depends(_get_rcs),
+) -> StandardResponse[RcsRawSubmitResult]:
+    redis_client: Redis = await get_redis()
+    svc = RcsSubmitService(session=session, redis_client=redis_client, rcs_client=rcs_client)
+    data = await svc.submit_raw(request=payload, idempotency_key=idempotency_key)
+    return StandardResponse[RcsRawSubmitResult](
+        success=True,
+        request_id=getattr(request.state, "request_id", ""),
+        data=data,
+    )
 
 
 _TASK_CREATE_EXAMPLES = {
