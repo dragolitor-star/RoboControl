@@ -454,7 +454,7 @@ const App = (() => {
           <div class="form-group"><label class="form-label">Öncelik</label><input id="m-priority" class="form-input" type="number" value="10" min="1" max="100"></div>
         </div>
         <div id="task-tab-rcs" style="display:none;">
-          <p class="rcs-editor-hint" style="margin-bottom:12px;">Ayarlar sayfasındaki IP ve port, taban URL olarak kullanılır. Aşağıdaki tam URL yalnızca önizlemedir; istek sunucuda HMAC ile imzalanır ve <code>sign</code> sorgu parametresi otomatik eklenir.</p>
+          <p class="rcs-editor-hint" style="margin-bottom:12px;">Ayarlar sayfasındaki IP ve port, taban URL olarak kullanılır. Varsayılan gönderim Postman ile aynıdır (imzasız + <code>X-LR-REQUEST-ID</code> header).</p>
           <div class="form-group">
             <label class="form-label">Taban URL (salt okunur)</label>
             <input type="text" id="rcs-preview-base" class="form-input code-editor-sm" readonly placeholder="Önizleme yükleniyor…">
@@ -471,6 +471,10 @@ const App = (() => {
           <div class="form-group" style="display:flex;align-items:center;gap:10px;">
             <input type="checkbox" id="rcs-persist" checked style="width:auto;">
             <label for="rcs-persist" style="margin:0;font-size:13px;color:var(--text-secondary);">RCS cevabında görev kodu varsa geçmişe kaydet</label>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+            <input type="checkbox" id="rcs-send-signed" style="width:auto;">
+            <label for="rcs-send-signed" style="margin:0;font-size:13px;color:var(--text-secondary);">İmzalı gönder (HMAC + sign query)</label>
           </div>
           <div style="margin-top:8px;">
             <button type="button" class="btn btn-ghost btn-sm" onclick="App.refreshRcsPreview()">${UI.icon('refresh')} Önizlemeyi yenile</button>
@@ -563,6 +567,7 @@ const App = (() => {
       return;
     }
     const persistTask = document.getElementById('rcs-persist')?.checked !== false;
+    const sendSigned = document.getElementById('rcs-send-signed')?.checked === true;
     btn.disabled = true;
     btn.textContent = 'Gönderiliyor…';
     try {
@@ -570,6 +575,7 @@ const App = (() => {
         method: 'POST',
         path,
         body,
+        sendSigned,
         persistTask,
       });
       const d = res.data;

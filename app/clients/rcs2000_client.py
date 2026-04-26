@@ -9,6 +9,7 @@ Responsibilities:
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -132,6 +133,42 @@ class RCS2000Client:
             idempotent=idempotent,
         )
 
+    async def plain_request(
+        self,
+        *,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Postman-compatible request without signature query/header."""
+        method_u = method.upper()
+        if method_u not in ("GET", "POST"):
+            raise ValueError(f"Unsupported HTTP method: {method}")
+        body_bytes = json.dumps(body, separators=(",", ":")).encode("utf-8") if body else b""
+        full_url = await self._resolve_full_url(path)
+        headers = {
+            "Content-Type": "application/json",
+            "X-LR-REQUEST-ID": datetime.utcnow().strftime("%Y%m%d%H%M%S"),
+        }
+        try:
+            response = await self._client.request(
+                method=method_u,
+                url=full_url,
+                content=body_bytes if body_bytes else None,
+                headers=headers,
+            )
+        except _RETRYABLE_HTTP_EXC as exc:
+            logger.warning("rcs_network_error_plain", path=path, method=method_u, error=str(exc))
+            raise RCSClientError(
+                message=f"RCS network error: {exc}",
+                code="RCS_NETWORK_ERROR",
+                details={"path": path, "method": method_u},
+            ) from exc
+        except httpx.HTTPError as exc:
+            logger.error("rcs_http_error_plain", path=path, error=str(exc))
+            raise RCSClientError(message=f"HTTP error: {exc}") from exc
+        return self._parse_response(response, path)
+
     # ------------------------------ internals ------------------------------- #
 
     async def _request(
@@ -199,15 +236,7 @@ class RCS2000Client:
             trace_id=signed.trace_id,
         )
 
-        redis_client = await get_redis()
-        rcs_ip = await redis_client.get("sysconfig:rcs_ip")
-        rcs_port = await redis_client.get("sysconfig:rcs_port")
-        
-        if rcs_ip and rcs_port:
-            base_url = f"http://{rcs_ip}:{rcs_port}"
-            full_url = f"{base_url}{path}"
-        else:
-            full_url = f"{self._base_url}{path}"
+        full_url = await self._resolve_full_url(path)
 
         try:
             response = await self._client.request(
@@ -231,6 +260,14 @@ class RCS2000Client:
             raise RCSClientError(message=f"HTTP error: {exc}") from exc
 
         return self._parse_response(response, path)
+
+    async def _resolve_full_url(self, path: str) -> str:
+        redis_client = await get_redis()
+        rcs_ip = await redis_client.get("sysconfig:rcs_ip")
+        rcs_port = await redis_client.get("sysconfig:rcs_port")
+        if rcs_ip and rcs_port:
+            return f"http://{rcs_ip}:{rcs_port}{path}"
+        return f"{self._base_url}{path}"
 
     def _parse_response(self, response: httpx.Response, path: str) -> dict[str, Any]:
         if response.status_code >= 500:
@@ -258,7 +295,15 @@ class RCS2000Client:
 
         # Even on 200, RCS may signal a business error in the envelope.
         envelope_code = data.get("code")
-        if envelope_code and envelope_code not in (0, "0", "Success", "OK", "success"):
+        if envelope_code and envelope_code not in (
+            0,
+            "0",
+            "0x00000000",
+            "Success",
+            "OK",
+            "success",
+            True,
+        ):
             self._raise_business_error(
                 str(envelope_code), str(data.get("message", "RCS error")), data
             )

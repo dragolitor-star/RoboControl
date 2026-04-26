@@ -92,9 +92,16 @@ def _meta_from_body(body: dict[str, Any] | None) -> tuple[str | None, str | None
     return source_code, target_code
 
 
-def _raw_fingerprint(method: str, path: str, body: dict[str, Any] | None) -> str:
+def _raw_fingerprint(
+    method: str, path: str, body: dict[str, Any] | None, send_signed: bool
+) -> str:
     return json.dumps(
-        {"method": method.upper(), "path": path, "body": body or {}},
+        {
+            "method": method.upper(),
+            "path": path,
+            "body": body or {},
+            "sendSigned": send_signed,
+        },
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -143,11 +150,19 @@ class RcsSubmitService:
                 return cached
 
         try:
-            rcs_response = await self._rcs.signed_request(
-                method=request.method,
-                path=path,
-                body=request.body if request.method == "POST" else None,
-            )
+            if request.send_signed:
+                rcs_response = await self._rcs.signed_request(
+                    method=request.method,
+                    path=path,
+                    body=request.body if request.method == "POST" else None,
+                )
+            else:
+                # Postman-compatible mode uses plain headers without sign query.
+                rcs_response = await self._rcs.plain_request(
+                    method=request.method,
+                    path=path,
+                    body=request.body if request.method == "POST" else None,
+                )
         except RCSClientError:
             logger.exception("rcs_raw_submit_failed", path=path, method=request.method)
             raise
@@ -197,6 +212,7 @@ class RcsSubmitService:
             "rcs_raw_submit_ok",
             path=path,
             method=request.method,
+            send_signed=request.send_signed,
             robot_task_code=robot_task_code,
             persisted=persisted,
         )
@@ -213,7 +229,9 @@ class RcsSubmitService:
         except (TypeError, ValueError):
             return None
         path = normalize_rcs_path(request.path)
-        if envelope.get("fingerprint") != _raw_fingerprint(request.method, path, request.body):
+        if envelope.get("fingerprint") != _raw_fingerprint(
+            request.method, path, request.body, request.send_signed
+        ):
             raise DuplicateTaskError(
                 message="Idempotency-Key reused with a different RCS request.",
                 details={"idempotency_key": key},
@@ -229,7 +247,9 @@ class RcsSubmitService:
         result: RcsRawSubmitResult,
     ) -> None:
         envelope = {
-            "fingerprint": _raw_fingerprint(request.method, normalized_path, request.body),
+            "fingerprint": _raw_fingerprint(
+                request.method, normalized_path, request.body, request.send_signed
+            ),
             "result": result.model_dump(by_alias=True),
         }
         await self._redis.setex(

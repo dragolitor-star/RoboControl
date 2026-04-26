@@ -47,13 +47,18 @@ class RcsSubmitPreviewData(BaseModel):
 
 
 class RcsRawSubmitRequest(BaseModel):
-    """Signed request to RCS; path is normalized (full URL → path only)."""
+    """Raw request to RCS; supports signed or Postman-compatible mode."""
 
     model_config = ConfigDict(populate_by_name=True)
 
     method: Literal["POST", "GET"] = "POST"
     path: str = Field(..., min_length=1, description="Path or full URL; host is ignored.")
     body: dict[str, Any] | None = None
+    send_signed: bool = Field(
+        default=False,
+        alias="sendSigned",
+        description="Use middleware signature strategy; false mimics Postman-style plain call.",
+    )
     persist_task: bool = Field(
         default=True,
         alias="persistTask",
