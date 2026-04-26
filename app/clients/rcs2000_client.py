@@ -148,7 +148,12 @@ class RCS2000Client:
         full_url = await self._resolve_full_url(path)
         headers = {
             "Content-Type": "application/json",
-            "X-LR-REQUEST-ID": datetime.utcnow().strftime("%Y%m%d%H%M%S"),
+            # Align with successful Postman sample (minute precision).
+            "X-LR-REQUEST-ID": datetime.utcnow().strftime("%Y%m%d%H%M"),
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "User-Agent": "PostmanRuntime/7.51.1",
         }
         logger.info(
             "rcs_plain_request_outgoing",
